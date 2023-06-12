@@ -1,10 +1,18 @@
 from utils.fe_blockchain_learning import FEBlockchainLearning
-
+from utils.trainer_management import TrainerManagement
 from scripts.helper import get_account
 import pydash as py_
 import time
 import utils.constants as Consts
 from bson.objectid import ObjectId
+
+
+def allow_trainer():
+    trainer_management = TrainerManagement(Consts.TRAINER_MANAGEMENT_PATH)
+    owner_account = get_account()
+    for i in range(0, 10):
+        this_account = get_account(index=i)
+        trainer_management.add_to_allowlist(owner_account, this_account.address)
 
 
 def full_flow():

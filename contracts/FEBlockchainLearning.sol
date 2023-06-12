@@ -1,19 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.9;
 
-import "@openzeppelin/contracts/access/AccessControl.sol";
 import "../interfaces/ITrainerManagement.sol";
+import "../interfaces/IAdminControl.sol";
 
-contract FEBlockchainLearning is AccessControl {
-    // this is admin, the ones who deploy this contract, we use this to recognize him when some call a function that only admin can call
-    address payable admin;
-
-    // AccessControl
-    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
-    bytes32 public constant CLIENT_ROLE = keccak256("CLIENT_ROLE");
-    bytes32 public constant TRAINER_ROLE = keccak256("TRAINER_ROLE");
-    bytes32 public constant AGGREGATOR_ROLE = keccak256("AGGREGATOR_ROLE");
-
+contract FEBlockchainLearning {
     // Sessions
     enum RoundStatus {
         Ready,
@@ -58,15 +49,19 @@ contract FEBlockchainLearning is AccessControl {
     }
 
     // Management System
-    mapping(uint256 => sessionDetail) sessionIdToSessionDetail;
+    mapping(uint256 => sessionDetail) private _sessionIdToSessionDetail;
 
     ITrainerManagement private _trainerManagement;
+    IAdminControl private _adminControl;
 
-    // Access Controll
-    constructor(address _trainerManagementAddress) {
-        admin = payable(msg.sender);
-        _setupRole(ADMIN_ROLE, admin);
+    modifier onlyAdmin(address account) {
+        require(_adminControl.isAdmin(account) == true, "You are not admin");
+        _;
+    }
+
+    constructor(address _trainerManagementAddress, address adminControl) {
         _trainerManagement = ITrainerManagement(_trainerManagementAddress);
+        _adminControl = IAdminControl(adminControl);
     }
 
     // Utils
@@ -74,7 +69,7 @@ contract FEBlockchainLearning is AccessControl {
         address submiter,
         uint256 sessionId
     ) private view returns (bool) {
-        address[] memory thisTrainerAddresses = sessionIdToSessionDetail[
+        address[] memory thisTrainerAddresses = _sessionIdToSessionDetail[
             sessionId
         ].trainerAddresses;
         for (uint256 i = 0; i < thisTrainerAddresses.length; i++) {
@@ -89,8 +84,9 @@ contract FEBlockchainLearning is AccessControl {
         address submiter,
         uint256 sessionId
     ) private view returns (bool) {
-        uint256 currentRound = sessionIdToSessionDetail[sessionId].currentRound;
-        trainUpdate[] memory allUpdateThisRound = sessionIdToSessionDetail[
+        uint256 currentRound = _sessionIdToSessionDetail[sessionId]
+            .currentRound;
+        trainUpdate[] memory allUpdateThisRound = _sessionIdToSessionDetail[
             sessionId
         ].roundToUpdateObject[currentRound];
         for (uint256 i = 0; i < allUpdateThisRound.length; i++) {
@@ -107,13 +103,14 @@ contract FEBlockchainLearning is AccessControl {
     function _checkAllTrainerSubmitted(
         uint256 sessionId
     ) private view returns (bool) {
-        uint256 currentRound = sessionIdToSessionDetail[sessionId].currentRound;
-        trainUpdate[] memory allUpdateThisRound = sessionIdToSessionDetail[
+        uint256 currentRound = _sessionIdToSessionDetail[sessionId]
+            .currentRound;
+        trainUpdate[] memory allUpdateThisRound = _sessionIdToSessionDetail[
             sessionId
         ].roundToUpdateObject[currentRound];
         if (
             allUpdateThisRound.length ==
-            sessionIdToSessionDetail[sessionId].trainerAddresses.length
+            _sessionIdToSessionDetail[sessionId].trainerAddresses.length
         ) {
             return true;
         }
@@ -125,8 +122,9 @@ contract FEBlockchainLearning is AccessControl {
         uint256 sessionId,
         address candidate
     ) private view returns (bool) {
-        uint256 currentRound = sessionIdToSessionDetail[sessionId].currentRound;
-        scoreObject memory _scoreObj = sessionIdToSessionDetail[sessionId]
+        uint256 currentRound = _sessionIdToSessionDetail[sessionId]
+            .currentRound;
+        scoreObject memory _scoreObj = _sessionIdToSessionDetail[sessionId]
             .roundToScorerToCandidateToScoreObj[currentRound][scorerAdrress][
                 candidate
             ];
@@ -153,7 +151,7 @@ contract FEBlockchainLearning is AccessControl {
         uint256 globalModelId,
         uint256 latestGlobalModelParamId,
         address[] memory trainerAddresses
-    ) external onlyRole(ADMIN_ROLE) {
+    ) external {
         for (uint256 i = 0; i < trainerAddresses.length; i++) {
             require(
                 _trainerManagement.isBlocked(trainerAddresses[i]) == false,
@@ -164,7 +162,7 @@ contract FEBlockchainLearning is AccessControl {
                 "Trainer is not allowed"
             );
         }
-        sessionDetail storage sDetail = sessionIdToSessionDetail[sessionId];
+        sessionDetail storage sDetail = _sessionIdToSessionDetail[sessionId];
         sDetail.sessionId = sessionId;
         sDetail.round = round;
         sDetail.currentRound = 0;
@@ -176,7 +174,7 @@ contract FEBlockchainLearning is AccessControl {
 
     // Session Implement
     function startRound(uint256 sessionId) external {
-        RoundStatus currentStatus = sessionIdToSessionDetail[sessionId].status;
+        RoundStatus currentStatus = _sessionIdToSessionDetail[sessionId].status;
         require(
             currentStatus == RoundStatus.Ready,
             "Session is not ready to start"
@@ -186,13 +184,13 @@ contract FEBlockchainLearning is AccessControl {
     }
 
     function _nextRound(uint256 sessionId) internal {
-        sessionIdToSessionDetail[sessionId].currentRound++;
-        sessionIdToSessionDetail[sessionId].status = RoundStatus.Training;
+        _sessionIdToSessionDetail[sessionId].currentRound++;
+        _sessionIdToSessionDetail[sessionId].status = RoundStatus.Training;
     }
 
     function submitUpdate(uint256 sessionId, uint256 update_id) external {
         require(
-            sessionIdToSessionDetail[sessionId].status == RoundStatus.Training,
+            _sessionIdToSessionDetail[sessionId].status == RoundStatus.Training,
             "Cannot submit update when session is not in state training"
         );
         require(
@@ -204,8 +202,9 @@ contract FEBlockchainLearning is AccessControl {
             "You submitted before"
         );
         trainUpdate memory newUpdate = trainUpdate(msg.sender, update_id);
-        uint256 currentRound = sessionIdToSessionDetail[sessionId].currentRound;
-        sessionIdToSessionDetail[sessionId]
+        uint256 currentRound = _sessionIdToSessionDetail[sessionId]
+            .currentRound;
+        _sessionIdToSessionDetail[sessionId]
             .roundToUpdateObject[currentRound]
             .push(newUpdate);
         if (_checkAllTrainerSubmitted(sessionId)) {
@@ -215,12 +214,12 @@ contract FEBlockchainLearning is AccessControl {
     }
 
     function _startScoring(uint256 sessionId) private {
-        RoundStatus currentStatus = sessionIdToSessionDetail[sessionId].status;
+        RoundStatus currentStatus = _sessionIdToSessionDetail[sessionId].status;
         require(
             currentStatus == RoundStatus.Training,
             "Session is not ready to score"
         );
-        sessionIdToSessionDetail[sessionId].status = RoundStatus.Scoring;
+        _sessionIdToSessionDetail[sessionId].status = RoundStatus.Scoring;
         // emit event
     }
 
@@ -230,7 +229,7 @@ contract FEBlockchainLearning is AccessControl {
         address candidateAddress
     ) external {
         require(
-            sessionIdToSessionDetail[sessionId].status == RoundStatus.Scoring,
+            _sessionIdToSessionDetail[sessionId].status == RoundStatus.Scoring,
             "Cannot submit update when session is not in state Scoring"
         );
         require(
@@ -245,7 +244,8 @@ contract FEBlockchainLearning is AccessControl {
             !(_checkScorerSubmitted(msg.sender, sessionId, candidateAddress)),
             "Submited before"
         );
-        uint256 currentRound = sessionIdToSessionDetail[sessionId].currentRound;
+        uint256 currentRound = _sessionIdToSessionDetail[sessionId]
+            .currentRound;
         // check submit before
         require(scores.length == 5, "Missing scores");
         scoreObject memory _scoreObj = scoreObject(
@@ -255,7 +255,7 @@ contract FEBlockchainLearning is AccessControl {
             scores[3],
             scores[4]
         );
-        sessionIdToSessionDetail[sessionId].roundToScorerToCandidateToScoreObj[
+        _sessionIdToSessionDetail[sessionId].roundToScorerToCandidateToScoreObj[
             currentRound
         ][msg.sender][candidateAddress] = _scoreObj;
         // check all submitted scores
@@ -267,7 +267,7 @@ contract FEBlockchainLearning is AccessControl {
     function _checkAllScorerSubmitted(
         uint256 sessionId
     ) private view returns (bool) {
-        address[] memory trainerAddresses = sessionIdToSessionDetail[sessionId]
+        address[] memory trainerAddresses = _sessionIdToSessionDetail[sessionId]
             .trainerAddresses;
         for (uint256 i = 0; i < trainerAddresses.length; i++) {
             for (uint256 j = 0; j < trainerAddresses.length; j++) {
@@ -289,18 +289,18 @@ contract FEBlockchainLearning is AccessControl {
     }
 
     function _startAggregate(uint256 sessionId, uint256 currentRound) private {
-        RoundStatus currentStatus = sessionIdToSessionDetail[sessionId].status;
+        RoundStatus currentStatus = _sessionIdToSessionDetail[sessionId].status;
         require(
             currentStatus == RoundStatus.Scoring,
             "Session is not ready to score"
         );
-        sessionIdToSessionDetail[sessionId].status = RoundStatus.Aggregating;
+        _sessionIdToSessionDetail[sessionId].status = RoundStatus.Aggregating;
         // choose aggregator (base on round)
-        address aggregator = sessionIdToSessionDetail[sessionId]
+        address aggregator = _sessionIdToSessionDetail[sessionId]
             .trainerAddresses[currentRound - 1];
         aggregateUpdate memory aggregateUpdateObj;
         aggregateUpdateObj.aggregatorAddress = aggregator;
-        sessionIdToSessionDetail[sessionId].roundToAggregatorAddress[
+        _sessionIdToSessionDetail[sessionId].roundToAggregatorAddress[
             currentRound
         ] = aggregateUpdateObj;
         // emit event
@@ -308,23 +308,24 @@ contract FEBlockchainLearning is AccessControl {
 
     function submitAggregate(uint256 sessionId, uint256 updateId) external {
         require(
-            sessionIdToSessionDetail[sessionId].status ==
+            _sessionIdToSessionDetail[sessionId].status ==
                 RoundStatus.Aggregating,
             "Cannot submit update when session is not in state Aggregating"
         );
         // check if this msg.sender is aggregator
-        uint256 currentRound = sessionIdToSessionDetail[sessionId].currentRound;
+        uint256 currentRound = _sessionIdToSessionDetail[sessionId]
+            .currentRound;
         require(
-            sessionIdToSessionDetail[sessionId]
+            _sessionIdToSessionDetail[sessionId]
                 .roundToAggregatorAddress[currentRound]
                 .aggregatorAddress == msg.sender,
             "You are not aggregator"
         );
-        sessionIdToSessionDetail[sessionId]
+        _sessionIdToSessionDetail[sessionId]
             .roundToAggregatorAddress[currentRound]
             .updateId = updateId;
         // check end of session
-        if (sessionIdToSessionDetail[sessionId].round == currentRound) {
+        if (_sessionIdToSessionDetail[sessionId].round == currentRound) {
             _endSession(sessionId);
         } else {
             // next round
@@ -333,31 +334,32 @@ contract FEBlockchainLearning is AccessControl {
     }
 
     function _endSession(uint256 sessionId) private {
-        RoundStatus currentStatus = sessionIdToSessionDetail[sessionId].status;
+        RoundStatus currentStatus = _sessionIdToSessionDetail[sessionId].status;
         require(
             currentStatus == RoundStatus.Aggregating,
             "Session is not ready to end"
         );
-        sessionIdToSessionDetail[sessionId].status = RoundStatus.End;
+        _sessionIdToSessionDetail[sessionId].status = RoundStatus.End;
         // emit event
     }
 
     function getCurrentRound(
         uint256 sessionId
     ) external view returns (uint256) {
-        return sessionIdToSessionDetail[sessionId].currentRound;
+        return _sessionIdToSessionDetail[sessionId].currentRound;
     }
 
     function getCurrentStatus(
         uint256 sessionId
     ) external view returns (RoundStatus) {
-        return sessionIdToSessionDetail[sessionId].status;
+        return _sessionIdToSessionDetail[sessionId].status;
     }
 
     function getAggregator(uint256 sessionId) external view returns (address) {
-        uint256 currentRound = sessionIdToSessionDetail[sessionId].currentRound;
+        uint256 currentRound = _sessionIdToSessionDetail[sessionId]
+            .currentRound;
         return
-            sessionIdToSessionDetail[sessionId]
+            _sessionIdToSessionDetail[sessionId]
                 .roundToAggregatorAddress[currentRound]
                 .aggregatorAddress;
     }
