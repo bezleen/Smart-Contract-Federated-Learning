@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.9;
 
 import "@openzeppelin/contracts/access/AccessControl.sol";
-
-// import "./Aggregator.sol";
-// import "./Trainer.sol";
+import "../interfaces/ITrainerManagement.sol";
 
 contract FEBlockchainLearning is AccessControl {
     // this is admin, the ones who deploy this contract, we use this to recognize him when some call a function that only admin can call
@@ -30,21 +28,13 @@ contract FEBlockchainLearning is AccessControl {
     }
 
     struct scoreObject {
-        // address candidateAddress;
-        // trueValue = x.10^-5
         uint256 accuracy;
         uint256 loss;
         uint256 precision;
         uint256 recall;
         uint256 f1;
-        // False Positive Rate (FPR)
-        // uint256 fpr;
     }
 
-    // struct scoreUpdate {
-    //     address scorerAddress;
-    //     scoreObject[] scoreObj;
-    // }
     struct scoreUpdate {
         address scorerAddress;
         mapping(address => scoreObject) candidateAddressToScoreObject;
@@ -63,7 +53,6 @@ contract FEBlockchainLearning is AccessControl {
         RoundStatus status;
         address[] trainerAddresses;
         mapping(uint256 => aggregateUpdate) roundToAggregatorAddress;
-        // mapping(uint256 => scoreUpdate[]) roundToScoreUpdate;
         mapping(uint256 => mapping(address => mapping(address => scoreObject))) roundToScorerToCandidateToScoreObj;
         mapping(uint256 => trainUpdate[]) roundToUpdateObject;
     }
@@ -71,11 +60,13 @@ contract FEBlockchainLearning is AccessControl {
     // Management System
     mapping(uint256 => sessionDetail) sessionIdToSessionDetail;
 
-    // Access Controll
+    ITrainerManagement private _trainerManagement;
 
-    constructor() {
+    // Access Controll
+    constructor(address _trainerManagementAddress) {
         admin = payable(msg.sender);
         _setupRole(ADMIN_ROLE, admin);
+        _trainerManagement = ITrainerManagement(_trainerManagementAddress);
     }
 
     // Utils
@@ -156,13 +147,6 @@ contract FEBlockchainLearning is AccessControl {
     }
 
     // Management System
-
-    function registerTrainer(
-        address trainerAddress
-    ) external onlyRole(ADMIN_ROLE) {
-        // TODO: handle logic here
-    }
-
     function initializeSession(
         uint256 sessionId,
         uint256 round,
@@ -170,6 +154,16 @@ contract FEBlockchainLearning is AccessControl {
         uint256 latestGlobalModelParamId,
         address[] memory trainerAddresses
     ) external onlyRole(ADMIN_ROLE) {
+        for (uint256 i = 0; i < trainerAddresses.length; i++) {
+            require(
+                _trainerManagement.isBlocked(trainerAddresses[i]) == false,
+                "Trainer is blocked"
+            );
+            require(
+                _trainerManagement.isAllowed(trainerAddresses[i]) == true,
+                "Trainer is not allowed"
+            );
+        }
         sessionDetail storage sDetail = sessionIdToSessionDetail[sessionId];
         sDetail.sessionId = sessionId;
         sDetail.round = round;

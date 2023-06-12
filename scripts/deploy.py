@@ -8,7 +8,13 @@ import pydash as py_
 def deploy_fe_blockchain_learing(export_path=Consts.FE_BLOCKCHAIN_LEARNING_CONTRACT_PATH, owner_account=None):
     if not owner_account:
         owner_account = get_account()
-    contract = FEBlockchainLearning.deploy({"from": owner_account})
+
+    # get trainer management address
+    with open(Consts.TRAINER_MANAGEMENT_PATH, "r") as f:
+        data = json.load(f)
+        trainer_management_address = py_.get(data, "address")
+
+    contract = FEBlockchainLearning.deploy(trainer_management_address, {"from": owner_account})
     print(f"Contract FEBlockchainLearning address: {contract.address}")
     abi_path = "build/contracts/FEBlockchainLearning.json"
     with open(abi_path, "r") as f:
@@ -42,5 +48,5 @@ def deploy_trainer_management(export_path=Consts.TRAINER_MANAGEMENT_PATH, owner_
 
 
 def main():
-    deploy_fe_blockchain_learing()
     deploy_trainer_management()
+    deploy_fe_blockchain_learing()

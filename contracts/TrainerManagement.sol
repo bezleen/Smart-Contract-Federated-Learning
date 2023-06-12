@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.9;
 
-contract TrainerManagerment {
+import "../interfaces/IAdminControl.sol";
+
+contract TrainerManagement {
     mapping(address => bool) private _blocklist;
     mapping(address => bool) private _allowlist;
     // event
@@ -10,31 +12,40 @@ contract TrainerManagerment {
     event trainerRemovedFromBlocklist(address indexed trainer);
     event trainerRemovedFromAllowlist(address indexed trainer);
 
-    constructor() {}
+    IAdminControl private _adminControl;
 
-    function addToBlocklist(address trainer) external {
-        // TODO: add a modifer to check if the msg.sender is admin or not
+    modifier onlyAdmin(address account) {
+        require(_adminControl.isAdmin(account) == true, "You are not admin");
+        _;
+    }
+
+    constructor(address adminControl) {
+        _adminControl = IAdminControl(adminControl);
+    }
+
+    function addToBlocklist(address trainer) external onlyAdmin(msg.sender) {
         require(!_blocklist[trainer], "trainer is already in blocklist");
         _blocklist[trainer] = true;
         emit trainerAddedToBlocklist(trainer);
     }
 
-    function removeFromBlocklist(address trainer) external {
-        // TODO: add a modifer to check if the msg.sender is admin or not
+    function removeFromBlocklist(
+        address trainer
+    ) external onlyAdmin(msg.sender) {
         require(_blocklist[trainer], "trainer is not blocked");
         _blocklist[trainer] = false;
         emit trainerRemovedFromBlocklist(trainer);
     }
 
-    function addToAllowlist(address trainer) external {
-        // TODO: add a modifer to check if the msg.sender is admin or not
+    function addToAllowlist(address trainer) external onlyAdmin(msg.sender) {
         require(!_allowlist[trainer], "trainer is already in allowlist");
         _allowlist[trainer] = true;
         emit trainerAddedToAllowlist(trainer);
     }
 
-    function removeFromAllowlist(address candidate) external {
-        // TODO: add a modifer to check if the msg.sender is admin or not
+    function removeFromAllowlist(
+        address candidate
+    ) external onlyAdmin(msg.sender) {
         require(_allowlist[candidate], "candidate is not allowed in allowlist");
         _allowlist[candidate] = false;
         emit trainerRemovedFromAllowlist(candidate);
