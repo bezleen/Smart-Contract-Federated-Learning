@@ -2,8 +2,9 @@
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/access/AccessControl.sol";
-import "./Aggregator.sol";
-import "./Trainer.sol";
+
+// import "./Aggregator.sol";
+// import "./Trainer.sol";
 
 contract FEBlockchainLearning is AccessControl {
     // this is admin, the ones who deploy this contract, we use this to recognize him when some call a function that only admin can call
@@ -29,7 +30,7 @@ contract FEBlockchainLearning is AccessControl {
     }
 
     struct scoreObject {
-        address candidateAddress;
+        // address candidateAddress;
         // trueValue = x.10^-5
         uint256 accuracy;
         uint256 loss;
@@ -40,9 +41,13 @@ contract FEBlockchainLearning is AccessControl {
         // uint256 fpr;
     }
 
+    // struct scoreUpdate {
+    //     address scorerAddress;
+    //     scoreObject[] scoreObj;
+    // }
     struct scoreUpdate {
         address scorerAddress;
-        scoreObject[] scoreObj;
+        mapping(address => scoreObject) candidateAddressToScoreObject;
     }
     struct aggregateUpdate {
         address aggregatorAddress;
@@ -58,18 +63,15 @@ contract FEBlockchainLearning is AccessControl {
         RoundStatus status;
         address[] trainerAddresses;
         mapping(uint256 => aggregateUpdate) roundToAggregatorAddress;
-        mapping(uint256 => scoreUpdate[]) roundToScoreUpdate;
+        // mapping(uint256 => scoreUpdate[]) roundToScoreUpdate;
+        mapping(uint256 => mapping(address => mapping(address => scoreObject))) roundToScorerToCandidateToScoreObj;
         mapping(uint256 => trainUpdate[]) roundToUpdateObject;
     }
 
     // Management System
     mapping(uint256 => sessionDetail) sessionIdToSessionDetail;
-    // Access Controll
 
-    modifier onlyRole(bytes32 role) {
-        require(hasRole(role, msg.sender) == true, "Required role");
-        _;
-    }
+    // Access Controll
 
     constructor() {
         admin = payable(msg.sender);
@@ -128,10 +130,29 @@ contract FEBlockchainLearning is AccessControl {
     }
 
     function _checkScorerSubmitted(
+        address scorerAdrress,
         uint256 sessionId,
         address candidate
     ) private view returns (bool) {
-        // TODO: handle logic here
+        uint256 currentRound = sessionIdToSessionDetail[sessionId].currentRound;
+        scoreObject memory _scoreObj = sessionIdToSessionDetail[sessionId]
+            .roundToScorerToCandidateToScoreObj[currentRound][scorerAdrress][
+                candidate
+            ];
+        if (
+            _scoreObj.accuracy != 0 ||
+            _scoreObj.loss != 0 ||
+            _scoreObj.precision != 0 ||
+            _scoreObj.recall != 0 ||
+            _scoreObj.f1 != 0
+        ) {
+            return true;
+        }
+        return false;
+    }
+
+    function scoreDecimals() external pure returns (uint8) {
+        return 5;
     }
 
     // Management System
@@ -166,9 +187,13 @@ contract FEBlockchainLearning is AccessControl {
             currentStatus == RoundStatus.Ready,
             "Session is not ready to start"
         );
+        _nextRound(sessionId);
+        // emit event
+    }
+
+    function _nextRound(uint256 sessionId) internal {
         sessionIdToSessionDetail[sessionId].currentRound++;
         sessionIdToSessionDetail[sessionId].status = RoundStatus.Training;
-        // emit event
     }
 
     function submitUpdate(uint256 sessionId, uint256 update_id) external {
@@ -181,7 +206,7 @@ contract FEBlockchainLearning is AccessControl {
             "You are not a trainer of this session"
         );
         require(
-            _checkTrainerSubmitted(msg.sender, sessionId),
+            !(_checkTrainerSubmitted(msg.sender, sessionId)),
             "You submitted before"
         );
         trainUpdate memory newUpdate = trainUpdate(msg.sender, update_id);
@@ -220,37 +245,127 @@ contract FEBlockchainLearning is AccessControl {
         );
         require(
             _isATrainerOfTheSession(candidateAddress, sessionId),
-            "This candidate is not a trainer of this session"
+            "Candidate is not a trainer of this session"
         );
-        // FIXME check Scorer Submitted
         require(
-            _checkTrainerSubmitted(msg.sender, sessionId),
-            "You submitted before"
+            !(_checkScorerSubmitted(msg.sender, sessionId, candidateAddress)),
+            "Submited before"
         );
-        require(scores.length == 6, "Missing scores");
         uint256 currentRound = sessionIdToSessionDetail[sessionId].currentRound;
-        scoreObject memory scoreObj = scoreObject(
-            candidateAddress,
+        // check submit before
+        require(scores.length == 5, "Missing scores");
+        scoreObject memory _scoreObj = scoreObject(
             scores[0],
             scores[1],
             scores[2],
             scores[3],
             scores[4]
-            // scores[5]
         );
-        scoreUpdate[] memory allScoreUpdate = sessionIdToSessionDetail[
-            sessionId
-        ].roundToScoreUpdate[currentRound];
-        for (uint256 i = 0; i < allScoreUpdate.length; i++) {
-            if (allScoreUpdate[i].scorerAddress == msg.sender) {
-                sessionIdToSessionDetail[sessionId]
-                    .roundToScoreUpdate[currentRound][i]
-                    .scoreObj
-                    .push(scoreObj);
-                break;
+        sessionIdToSessionDetail[sessionId].roundToScorerToCandidateToScoreObj[
+            currentRound
+        ][msg.sender][candidateAddress] = _scoreObj;
+        // check all submitted scores
+        if (_checkAllScorerSubmitted(sessionId)) {
+            _startAggregate(sessionId, currentRound);
+        }
+    }
+
+    function _checkAllScorerSubmitted(
+        uint256 sessionId
+    ) private view returns (bool) {
+        address[] memory trainerAddresses = sessionIdToSessionDetail[sessionId]
+            .trainerAddresses;
+        for (uint256 i = 0; i < trainerAddresses.length; i++) {
+            for (uint256 j = 0; j < trainerAddresses.length; j++) {
+                if (i == j) {
+                    continue;
+                }
+                if (
+                    _checkScorerSubmitted(
+                        trainerAddresses[i],
+                        sessionId,
+                        trainerAddresses[j]
+                    ) == false
+                ) {
+                    return false;
+                }
             }
         }
-        // TODO: check all submitted scores
+        return true;
+    }
+
+    function _startAggregate(uint256 sessionId, uint256 currentRound) private {
+        RoundStatus currentStatus = sessionIdToSessionDetail[sessionId].status;
+        require(
+            currentStatus == RoundStatus.Scoring,
+            "Session is not ready to score"
+        );
+        sessionIdToSessionDetail[sessionId].status = RoundStatus.Aggregating;
+        // choose aggregator (base on round)
+        address aggregator = sessionIdToSessionDetail[sessionId]
+            .trainerAddresses[currentRound - 1];
+        aggregateUpdate memory aggregateUpdateObj;
+        aggregateUpdateObj.aggregatorAddress = aggregator;
+        sessionIdToSessionDetail[sessionId].roundToAggregatorAddress[
+            currentRound
+        ] = aggregateUpdateObj;
+        // emit event
+    }
+
+    function submitAggregate(uint256 sessionId, uint256 updateId) external {
+        require(
+            sessionIdToSessionDetail[sessionId].status ==
+                RoundStatus.Aggregating,
+            "Cannot submit update when session is not in state Aggregating"
+        );
+        // check if this msg.sender is aggregator
+        uint256 currentRound = sessionIdToSessionDetail[sessionId].currentRound;
+        require(
+            sessionIdToSessionDetail[sessionId]
+                .roundToAggregatorAddress[currentRound]
+                .aggregatorAddress == msg.sender,
+            "You are not aggregator"
+        );
+        sessionIdToSessionDetail[sessionId]
+            .roundToAggregatorAddress[currentRound]
+            .updateId = updateId;
+        // check end of session
+        if (sessionIdToSessionDetail[sessionId].round == currentRound) {
+            _endSession(sessionId);
+        } else {
+            // next round
+            _nextRound(sessionId);
+        }
+    }
+
+    function _endSession(uint256 sessionId) private {
+        RoundStatus currentStatus = sessionIdToSessionDetail[sessionId].status;
+        require(
+            currentStatus == RoundStatus.Aggregating,
+            "Session is not ready to end"
+        );
+        sessionIdToSessionDetail[sessionId].status = RoundStatus.End;
+        // emit event
+    }
+
+    function getCurrentRound(
+        uint256 sessionId
+    ) external view returns (uint256) {
+        return sessionIdToSessionDetail[sessionId].currentRound;
+    }
+
+    function getCurrentStatus(
+        uint256 sessionId
+    ) external view returns (RoundStatus) {
+        return sessionIdToSessionDetail[sessionId].status;
+    }
+
+    function getAggregator(uint256 sessionId) external view returns (address) {
+        uint256 currentRound = sessionIdToSessionDetail[sessionId].currentRound;
+        return
+            sessionIdToSessionDetail[sessionId]
+                .roundToAggregatorAddress[currentRound]
+                .aggregatorAddress;
     }
 
     function fetchRoundData(uint256 sessionId, uint256 round) external view {
@@ -258,18 +373,6 @@ contract FEBlockchainLearning is AccessControl {
     }
 
     function fetchSessionData(uint256 sessionId) external view {
-        // TODO: handle logic here
-    }
-
-    function startAggregate(uint256 sessionId) external view {
-        // TODO: handle logic here
-    }
-
-    function submitAggregate(uint256 sessionId) external view {
-        // TODO: handle logic here
-    }
-
-    function endSession(uint256 sessionId) external view {
         // TODO: handle logic here
     }
 }

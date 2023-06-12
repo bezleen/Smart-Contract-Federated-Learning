@@ -1,4 +1,4 @@
-from brownie import FEBlockchainLearning
+from brownie import FEBlockchainLearning, TrainerManagement
 import utils.constants as Consts
 from scripts.helper import get_account
 import json
@@ -23,5 +23,24 @@ def deploy_fe_blockchain_learing(export_path=Consts.FE_BLOCKCHAIN_LEARNING_CONTR
         f.write(json.dumps(data))
 
 
+def deploy_trainer_management(export_path=Consts.TRAINER_MANAGEMENT_PATH, owner_account=None):
+    if not owner_account:
+        owner_account = get_account()
+    contract = TrainerManagement.deploy({"from": owner_account})
+    print(f"Contract TrainerManagement address: {contract.address}")
+    abi_path = "build/contracts/TrainerManagement.json"
+    with open(abi_path, "r") as f:
+        data = json.load(f)
+        abi = py_.get(data, "abi")
+    data = {
+        "address": contract.address,
+        "abi": abi,
+        "name": "TrainerManagement"
+    }
+    with open(export_path, "w") as f:
+        f.write(json.dumps(data))
+
+
 def main():
     deploy_fe_blockchain_learing()
+    deploy_trainer_management()
