@@ -1,3 +1,6 @@
 FE_BLOCKCHAIN_LEARNING_CONTRACT_PATH = "./contract_export/FEBlockchainLearning.json"
 TRAINER_MANAGEMENT_PATH = "./contract_export/TrainerManagement.json"
 ADMIN_CONTROL_PATH = "./contract_export/AdminControl.json"
+FE_TOKEN_PATH = "./contract_export/FEToken.json"
+TIME_LOCK_PATH = "./contract_export/TimeLock.json"
+PRD_PATH = "./contract_export/PRD.json"
