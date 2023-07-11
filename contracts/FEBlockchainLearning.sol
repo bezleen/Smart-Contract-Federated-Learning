@@ -342,4 +342,8 @@ contract FEBlockchainLearning {
             }
         }
     }
+
+    function claimPerformanceReward(uint256 sessionId, uint256 round) external {
+        payable(msg.sender).transfer(_sessions.info.performanceReward / 5);
+    }
 }
